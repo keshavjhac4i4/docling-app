@@ -188,6 +188,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const uploadArea = document.getElementById('uploadArea');
     const fileInput = document.getElementById('fileInput');
+    const uploadFilename = document.getElementById('uploadFilename');
     const convertBtn = document.getElementById('convertBtn');
     const loading = document.getElementById('loading');
     const loadingFileName = document.getElementById('loadingFileName');
@@ -201,6 +202,10 @@ window.addEventListener('DOMContentLoaded', () => {
         if (convertBtn) convertBtn.disabled = isLoading;
         if (isLoading && loadingFileName) {
             loadingFileName.textContent = state.fileName;
+        }
+        // Hide filename in upload area when loading starts
+        if (isLoading && uploadFilename) {
+            uploadFilename.classList.remove('show');
         }
     };
 
@@ -253,6 +258,12 @@ window.addEventListener('DOMContentLoaded', () => {
         clearError();
         displayOriginalDocument();
         if (convertBtn) convertBtn.disabled = false;
+        
+        // Show filename in upload area
+        if (uploadFilename) {
+            uploadFilename.textContent = state.fileName;
+            uploadFilename.classList.add('show');
+        }
     }
 
     convertBtn?.addEventListener('click', async () => {

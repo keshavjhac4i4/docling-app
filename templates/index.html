@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR App</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js" defer></script>
+    <script src="/static/js/app.js" defer></script>
+</head>
+<body>
+    <div class="page">
+        <header class="header">
+            <div class="brand">
+                <div class="brand-icon" aria-hidden="true">📄</div>
+                <div class="brand-text">
+                    <h1>OCR App</h1>
+                    <p>Convert your documents to Markdown with OCR</p>
+                </div>
+            </div>
+            <div class="actions">
+                <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">
+                    <span class="toggle-icon" data-light>☀️</span>
+                    <span class="toggle-icon" data-dark>🌙</span>
+                </button>
+            </div>
+        </header>
+
+        <section class="system-info" id="systemInfo">
+            <div class="info-item">🖥️ Device: <strong id="deviceInfo">Loading...</strong></div>
+            <div class="info-item">⚡ Threads: <strong id="threadsInfo">Loading...</strong></div>
+        </section>
+
+        <main class="content">
+            <section class="card">
+                <div class="upload-area" id="uploadArea" role="button" tabindex="0" aria-label="Upload or drop a file">
+                    <div class="upload-icon" aria-hidden="true">⬆️</div>
+                    <div class="upload-text">Click to upload or drag and drop</div>
+                    <div class="upload-subtext">Supports PDF, DOCX and images</div>
+                    <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp" aria-hidden="true">
+                </div>
+
+                <div class="selected-file" id="selectedFile">
+                    <span class="file-name" id="fileName"></span>
+                </div>
+
+                <button class="btn" id="convertBtn" disabled>Convert to Markdown</button>
+
+                <div class="loading" id="loading" aria-live="polite">
+                    <div class="spinner" aria-hidden="true"></div>
+                    <p>Processing your document... This may take a few minutes.</p>
+                </div>
+
+                <div class="error-message" id="errorMessage" role="alert"></div>
+            </section>
+
+            <section class="card output-section" id="outputSection">
+                <div class="output-header">
+                    <h2>Document Preview</h2>
+                </div>
+                <div class="preview-container">
+                    <div class="preview-panel original-panel">
+                        <h3>Original Document</h3>
+                        <div class="original-viewer" id="originalViewer">
+                            <div class="original-placeholder">
+                                <p>Original document will appear here after processing</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="preview-panel output-panel">
+                        <div class="output-panel-header">
+                            <h3>OCR Output</h3>
+                            <div class="toggle-container">
+                                <span class="toggle-label">Raw</span>
+                                <button class="toggle-switch" id="toggleSwitch" aria-pressed="false" aria-label="Toggle preview">
+                                    <span class="toggle-slider"></span>
+                                </button>
+                                <span class="toggle-label">Preview</span>
+                            </div>
+                        </div>
+                        <div class="output-content" id="outputContent"></div>
+                        <button class="download-btn" id="downloadBtn">Download Markdown</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+</body>
+</html>
+
+

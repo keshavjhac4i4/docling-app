@@ -4,14 +4,19 @@ Docling FastAPI App with UI
 A FastAPI wrapper for the docling command with automatic device detection and clean UI.
 """
 
-import subprocess
-import os
-import tempfile
+import logging
+import mimetypes
 import multiprocessing
+import os
+import socket
+import subprocess
+import tempfile
+import threading
+import time
+import uuid
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
-import socket
-import mimetypes
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -34,8 +39,16 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+TEMP_UPLOAD_DIR = BASE_DIR / "temp_uploads"
+TEMP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+TEMP_FILE_MAX_AGE = int(os.environ.get("DOC_TEMP_FILE_MAX_AGE", "3600"))
+
 # Global storage for temporary files (for serving original documents)
 temp_files = {}
+temp_files_lock = threading.Lock()
 
 # Enable CORS for cross-origin usage (e.g., accessing API from other devices)
 app.add_middleware(
@@ -46,6 +59,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@lru_cache(maxsize=1)
 def detect_device():
     """
     Detect if CUDA is available, otherwise use CPU.
@@ -67,6 +81,7 @@ def detect_device():
     
     return "cpu"
 
+@lru_cache(maxsize=1)
 def get_num_threads():
     """
     Get the number of CPU threads available.
@@ -144,6 +159,80 @@ def run_docling(input_file: str, device: Optional[str] = None, num_threads: Opti
         except Exception as e:
             return False, "", f"Error: {str(e)}"
 
+
+def cleanup_expired_files(max_age: Optional[int] = None) -> None:
+    """Remove temporary files that have exceeded the allowed lifetime."""
+    age_limit = max_age if max_age is not None else TEMP_FILE_MAX_AGE
+    if age_limit <= 0:
+        return
+
+    now = time.time()
+    stale_records = []
+
+    with temp_files_lock:
+        for file_id, meta in list(temp_files.items()):
+            created_at = meta.get("created_at", now)
+            if now - created_at > age_limit:
+                stale_records.append((file_id, meta.get("path")))
+                temp_files.pop(file_id, None)
+
+    for file_id, path in stale_records:
+        if not path:
+            continue
+        try:
+            Path(path).unlink(missing_ok=True)
+            logger.debug("Removed stale temporary file %s", path)
+        except OSError as exc:
+            logger.debug("Failed to remove stale temp file %s: %s", path, exc)
+
+
+def register_temp_file(file_id: str, file_path: Path, content_type: str, original_name: str) -> None:
+    """Add a new temporary file to the registry and trigger cleanup."""
+    cleanup_expired_files()
+    entry = {
+        "path": str(file_path),
+        "content_type": content_type,
+        "original_name": original_name,
+        "created_at": time.time()
+    }
+    with temp_files_lock:
+        temp_files[file_id] = entry
+    logger.debug("Registered temporary file %s -> %s", file_id, file_path)
+
+
+def resolve_temp_file(file_id: str) -> dict:
+    """Retrieve temp file metadata or raise KeyError if unavailable."""
+    cleanup_expired_files()
+    with temp_files_lock:
+        entry = temp_files.get(file_id)
+    if not entry:
+        raise KeyError(file_id)
+    return entry
+
+
+def infer_content_type(filename: str) -> str:
+    """Best-effort content type detection with sensible fallbacks."""
+    content_type, _ = mimetypes.guess_type(filename)
+    if content_type:
+        return content_type
+
+    ext = Path(filename).suffix.lower()
+    fallback_map = {
+        '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.doc': 'application/msword',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.bmp': 'image/bmp',
+        '.tif': 'image/tiff',
+        '.tiff': 'image/tiff',
+        '.txt': 'text/plain'
+    }
+    return fallback_map.get(ext, 'application/octet-stream')
+
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     """Serve the main UI."""
@@ -160,11 +249,16 @@ async def get_info():
 @app.get("/original/{file_id}")
 async def get_original_document(file_id: str):
     """Serve the original uploaded document."""
-    if file_id not in temp_files:
-        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        entry = resolve_temp_file(file_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="File not found") from None
 
-    file_path, content_type = temp_files[file_id]
-    if not os.path.exists(file_path):
+    file_path = Path(entry["path"]).resolve()
+    content_type = entry.get("content_type", "application/octet-stream")
+    original_name = entry.get("original_name")
+
+    if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
     if content_type == 'application/pdf':
@@ -178,13 +272,13 @@ async def get_original_document(file_id: str):
             media_type=content_type,
             headers=headers
         )
-    else:
-        # For other files, allow normal download behavior
-        return FileResponse(
-            path=file_path,
-            media_type=content_type,
-            filename=os.path.basename(file_path)
-        )
+
+    download_name = original_name or file_path.name
+    return FileResponse(
+        path=file_path,
+        media_type=content_type,
+        filename=download_name
+    )
 
 @app.post("/convert")
 async def convert_document(
@@ -217,70 +311,68 @@ async def convert_document(
             detail="num_threads must be positive"
         )
     
-    # Save uploaded file to temporary location
-    import uuid
+    original_filename = file.filename or "uploaded_document"
+    suffix = Path(original_filename).suffix
     file_id = str(uuid.uuid4())
-    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp_file:
-        content = await file.read()
-        tmp_file.write(content)
-        tmp_file_path = tmp_file.name
+    temp_file_path = TEMP_UPLOAD_DIR / f"{file_id}{suffix}"
 
-    # Determine content type
-    content_type, _ = mimetypes.guess_type(file.filename)
-    if not content_type:
-        # Default content types for common document formats
-        ext = Path(file.filename).suffix.lower()
-        if ext == '.pdf':
-            content_type = 'application/pdf'
-        elif ext in ['.docx', '.doc']:
-            content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        elif ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
-            content_type = f'image/{ext[1:]}'
-        elif ext in ['.txt']:
-            content_type = 'text/plain'
-        else:
-            content_type = 'application/octet-stream'
-
-    # Debug logging
-    print(f"File uploaded: {file.filename}, detected content_type: {content_type}")
-
-    # Store file info for serving original document
-    temp_files[file_id] = (tmp_file_path, content_type)
-    
     try:
-        # Process the file
+        content = await file.read()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to read uploaded file") from exc
+
+    try:
+        with temp_file_path.open("wb") as temp_file:
+            temp_file.write(content)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="Failed to store uploaded file") from exc
+
+    content_type = infer_content_type(original_filename)
+    selected_device = device or detect_device()
+    selected_threads = num_threads or get_num_threads()
+
+    try:
         success, markdown_content, error = run_docling(
-            tmp_file_path,
-            device=device,
-            num_threads=num_threads
+            str(temp_file_path),
+            device=selected_device,
+            num_threads=selected_threads
         )
-        
+
         if not success:
-            raise HTTPException(status_code=500, detail=error)
-        
-        # Get actual settings used
-        actual_device = device if device else detect_device()
-        actual_threads = num_threads if num_threads else get_num_threads()
-        
+            raise HTTPException(status_code=500, detail=error or "Conversion failed")
+
+        register_temp_file(file_id, temp_file_path, content_type, original_filename)
+
+        logger.info(
+            "Conversion complete for %s (device=%s, threads=%s)",
+            original_filename,
+            selected_device,
+            selected_threads
+        )
+
         return JSONResponse(content={
             "success": True,
-            "filename": file.filename,
+            "filename": original_filename,
             "markdown": markdown_content,
             "original_file": {
                 "id": file_id,
                 "url": f"/original/{file_id}",
-                "content_type": content_type
+                "content_type": content_type,
+                "original_name": original_filename
             },
             "settings": {
-                "device": actual_device,
-                "num_threads": actual_threads
+                "device": selected_device,
+                "num_threads": selected_threads
             }
         })
-        
-    finally:
-        # Note: File cleanup is handled separately to allow serving of original documents
-        # Files are cleaned up when the server restarts or when explicitly removed
-        pass
+
+    except HTTPException:
+        temp_file_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        temp_file_path.unlink(missing_ok=True)
+        logger.exception("Unexpected error during conversion")
+        raise HTTPException(status_code=500, detail="Unexpected error during conversion") from exc
 
 if __name__ == "__main__":
     device = detect_device()
@@ -316,4 +408,4 @@ if __name__ == "__main__":
     print("Open your browser and navigate to one of the URLs above (ensure firewall allows inbound access on the chosen port)")
     print("="*60 + "\n")
     
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run("app:app", host=host, port=port, reload=True)

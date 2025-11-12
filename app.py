@@ -365,12 +365,26 @@ async def convert_document(
             selected_threads
         )
 
+        json_data = None
+        report_info = None
+        report_detection = None
+
         try:
             json_outcome = convert_markdown_to_json(
                 markdown_content,
                 report_id=report_id,
                 original_filename=original_filename,
             )
+        except UnknownReportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ReportDetectionError as exc:
+            report_detection = {
+                "message": exc.message,
+                "candidates": [candidate.as_dict() for candidate in exc.candidates],
+            }
+        except ReportConversionError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        else:
             json_data = json_outcome.data
             report_info = {
                 "id": json_outcome.report_id,
@@ -378,18 +392,6 @@ async def convert_document(
                 "score": json_outcome.score,
                 "matched_keywords": json_outcome.matched_keywords,
             }
-        except UnknownReportError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except ReportDetectionError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": exc.message,
-                    "candidates": [candidate.as_dict() for candidate in exc.candidates],
-                },
-            ) from exc
-        except ReportConversionError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
         return JSONResponse(content={
             "success": True,
@@ -397,6 +399,7 @@ async def convert_document(
             "markdown": markdown_content,
             "json": json_data,
             "report": report_info,
+            "report_detection": report_detection,
             "original_file": {
                 "id": file_id,
                 "url": f"/original/{file_id}",

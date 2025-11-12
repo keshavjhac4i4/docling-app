@@ -421,11 +421,13 @@ window.addEventListener('DOMContentLoaded', () => {
                 if (state.originalFile && state.originalFile.original_name) {
                     state.fileName = state.originalFile.original_name;
                 }
+                const detectionInfo = data.report_detection;
                 state.json = data.json || null;
                 state.report = data.report || null;
                 if (!reportSelect?.value && state.report?.id) {
                     reportSelect.value = state.report.id;
                 }
+                clearError();
                 displayOriginalDocument();
                 displayOutput();
                 displayJsonOutput();
@@ -434,6 +436,12 @@ window.addEventListener('DOMContentLoaded', () => {
                     setActiveTab(VIEW.json);
                 } else {
                     setActiveTab(VIEW.markdown);
+                }
+                if (detectionInfo?.message || (Array.isArray(detectionInfo?.candidates) && detectionInfo.candidates.length > 0)) {
+                    showError(
+                        detectionInfo.message || 'JSON conversion is not available for this document.',
+                        detectionInfo
+                    );
                 }
                 // Auto scroll to the output and to the bottom of its content
                 requestAnimationFrame(() => {

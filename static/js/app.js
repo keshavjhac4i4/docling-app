@@ -176,6 +176,8 @@ function displayJsonOutput() {
     const jsonContent = document.getElementById('jsonContent');
     const tabJson = document.getElementById('tabJson');
     const tabPanelJson = document.getElementById('tabPanelJson');
+    const copyJsonBtnEl = document.getElementById('copyJsonBtn');
+    const downloadJsonBtnEl = document.getElementById('downloadJsonBtn');
 
     if (!jsonOutput) return;
 
@@ -186,6 +188,8 @@ function displayJsonOutput() {
         tabPanelJson?.classList.remove('has-data');
         if (jsonContent) jsonContent.textContent = '';
         if (jsonReportInfo) jsonReportInfo.textContent = '';
+        if (copyJsonBtnEl) copyJsonBtnEl.disabled = true;
+        if (downloadJsonBtnEl) downloadJsonBtnEl.disabled = true;
         return;
     }
 
@@ -202,6 +206,8 @@ function displayJsonOutput() {
             jsonReportInfo.textContent = '';
         }
     }
+    if (copyJsonBtnEl) copyJsonBtnEl.disabled = false;
+    if (downloadJsonBtnEl) downloadJsonBtnEl.disabled = false;
 }
 
 function setActiveTab(view) {
@@ -257,6 +263,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const downloadBtn = document.getElementById('downloadBtn');
     const errorMessage = document.getElementById('errorMessage');
     const copyJsonBtn = document.getElementById('copyJsonBtn');
+    const downloadJsonBtn = document.getElementById('downloadJsonBtn');
     const tabMarkdown = document.getElementById('tabMarkdown');
     const tabJson = document.getElementById('tabJson');
 
@@ -505,6 +512,31 @@ window.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.warn('Failed to copy JSON', err);
             showError('Unable to copy JSON to clipboard.');
+        }
+    });
+
+    downloadJsonBtn?.addEventListener('click', async () => {
+        if (!state.json) return;
+        try {
+            const response = await fetch('/convert/json-binary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ json: state.json })
+            });
+            if (!response.ok) {
+                throw new Error('Failed to download JSON');
+            }
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const base = state.fileName?.replace(/\.[^/.]+$/, '') || 'document';
+            a.download = `${base}.pickle`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.warn('Failed to download JSON binary', err);
+            showError('Unable to download JSON binary.');
         }
     });
 

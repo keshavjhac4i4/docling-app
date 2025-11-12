@@ -14,12 +14,13 @@ import tempfile
 import threading
 import time
 import uuid
+import pickle
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request, Form
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
@@ -419,6 +420,26 @@ async def convert_document(
         temp_file_path.unlink(missing_ok=True)
         logger.exception("Unexpected error during conversion")
         raise HTTPException(status_code=500, detail="Unexpected error during conversion") from exc
+
+
+@app.post("/convert/json-binary")
+async def convert_json_binary(payload: dict):
+    """Serialize provided JSON to pickle binary for download."""
+    json_data = payload.get("json")
+    if json_data is None:
+        raise HTTPException(status_code=400, detail="JSON content is required")
+
+    try:
+        binary = pickle.dumps(json_data, protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception as exc:
+        logger.exception("Failed to serialize JSON to pickle")
+        raise HTTPException(status_code=500, detail="Failed to serialize JSON") from exc
+
+    headers = {
+        "Content-Disposition": 'attachment; filename="output.pickle"'
+    }
+    return Response(content=binary, media_type="application/octet-stream", headers=headers)
+
 
 if __name__ == "__main__":
     device = detect_device()

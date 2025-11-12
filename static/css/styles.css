@@ -523,9 +523,12 @@ body {
     margin-top: 12px;
     display: flex;
     justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
-.json-copy {
+.json-copy,
+.json-download {
     padding: 8px 16px;
     border-radius: 10px;
     border: 0;
@@ -536,8 +539,17 @@ body {
     cursor: pointer;
 }
 
-.json-copy:hover { transform: translateY(-1px); }
-.json-copy:active { box-shadow: var(--inset-dark), var(--inset-light); transform: translateY(0); }
+.json-copy:hover,
+.json-download:hover { transform: translateY(-1px); }
+.json-copy:active,
+.json-download:active { box-shadow: var(--inset-dark), var(--inset-light); transform: translateY(0); }
+.json-copy:disabled,
+.json-download:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+    box-shadow: var(--inset-dark), var(--inset-light);
+    transform: none;
+}
 
 .report-candidate-list {
     display: flex;

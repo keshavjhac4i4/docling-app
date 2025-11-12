@@ -18,12 +18,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+
+from services import (
+    ReportConversionError,
+    ReportDetectionError,
+    UnknownReportError,
+    convert_markdown_to_json,
+    list_available_reports,
+)
 
 app = FastAPI(
     title="Docling API",
@@ -155,7 +163,7 @@ def run_docling(input_file: str, device: Optional[str] = None, num_threads: Opti
         except subprocess.CalledProcessError as e:
             return False, "", f"Error running docling:\n{e.stderr}"
         except subprocess.TimeoutExpired:
-            return False, "", "Processing timeout (5 minutes exceeded)"
+            return False, "", "Processing timeout (10 minutes exceeded)"
         except Exception as e:
             return False, "", f"Error: {str(e)}"
 
@@ -246,6 +254,12 @@ async def get_info():
         "num_threads": get_num_threads()
     }
 
+
+@app.get("/reports")
+async def get_reports():
+    """List all available report converters."""
+    return {"reports": list_available_reports()}
+
 @app.get("/original/{file_id}")
 async def get_original_document(file_id: str):
     """Serve the original uploaded document."""
@@ -284,7 +298,8 @@ async def get_original_document(file_id: str):
 async def convert_document(
     file: UploadFile = File(...),
     device: Optional[str] = None,
-    num_threads: Optional[int] = None
+    num_threads: Optional[int] = None,
+    report_id: Optional[str] = Form(None)
 ):
     """
     Convert a document to Markdown using Docling.
@@ -350,10 +365,38 @@ async def convert_document(
             selected_threads
         )
 
+        try:
+            json_outcome = convert_markdown_to_json(
+                markdown_content,
+                report_id=report_id,
+                original_filename=original_filename,
+            )
+            json_data = json_outcome.data
+            report_info = {
+                "id": json_outcome.report_id,
+                "name": json_outcome.display_name,
+                "score": json_outcome.score,
+                "matched_keywords": json_outcome.matched_keywords,
+            }
+        except UnknownReportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ReportDetectionError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": exc.message,
+                    "candidates": [candidate.as_dict() for candidate in exc.candidates],
+                },
+            ) from exc
+        except ReportConversionError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
         return JSONResponse(content={
             "success": True,
             "filename": original_filename,
             "markdown": markdown_content,
+            "json": json_data,
+            "report": report_info,
             "original_file": {
                 "id": file_id,
                 "url": f"/original/{file_id}",

@@ -40,6 +40,13 @@
                     <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp" aria-hidden="true">
                 </div>
 
+                <div class="report-select">
+                    <label for="reportSelect">Report Type</label>
+                    <select id="reportSelect" aria-label="Select report type">
+                        <option value="">Auto detect</option>
+                    </select>
+                </div>
+
                 <button class="btn" id="convertBtn" disabled>Convert to Markdown</button>
 
                 <div class="loading" id="loading" aria-live="polite">
@@ -70,17 +77,37 @@
                     </div>
                     <div class="preview-panel output-panel" role="region" aria-labelledby="ocrOutputHeading">
                         <div class="output-panel-header">
-                            <h3 id="ocrOutputHeading">OCR Output</h3>
-                            <div class="toggle-container">
-                                <span class="toggle-label">Raw</span>
-                                <button class="toggle-switch" id="toggleSwitch" aria-pressed="false" aria-label="Toggle preview">
-                                    <span class="toggle-slider"></span>
-                                </button>
-                                <span class="toggle-label">Preview</span>
+                            <h3 id="ocrOutputHeading">Output</h3>
+                        </div>
+                        <div class="output-tabs" role="tablist">
+                            <button class="tab-btn active" id="tabMarkdown" role="tab" aria-selected="true" aria-controls="tabPanelMarkdown">Markdown</button>
+                            <button class="tab-btn" id="tabJson" role="tab" aria-selected="false" aria-controls="tabPanelJson">JSON</button>
+                        </div>
+                        <div class="tab-panel active" id="tabPanelMarkdown" role="tabpanel" aria-labelledby="tabMarkdown">
+                            <div class="markdown-toolbar">
+                                <div class="toggle-container">
+                                    <span class="toggle-label">Raw</span>
+                                    <button class="toggle-switch" id="toggleSwitch" aria-pressed="false" aria-label="Toggle preview">
+                                        <span class="toggle-slider"></span>
+                                    </button>
+                                    <span class="toggle-label">Preview</span>
+                                </div>
+                                <button class="download-btn" id="downloadBtn">Download Markdown</button>
+                            </div>
+                            <div class="output-content" id="outputContent" aria-live="polite"></div>
+                        </div>
+                        <div class="tab-panel" id="tabPanelJson" role="tabpanel" aria-labelledby="tabJson">
+                            <div class="json-output" id="jsonOutput">
+                                <div class="json-header">
+                                    <h3>JSON Output</h3>
+                                    <span class="json-report-info" id="jsonReportInfo"></span>
+                                </div>
+                                <pre class="json-content" id="jsonContent" aria-live="polite"></pre>
+                                <div class="json-actions">
+                                    <button class="json-copy" id="copyJsonBtn" type="button">Copy JSON</button>
+                                </div>
                             </div>
                         </div>
-                        <div class="output-content" id="outputContent" aria-live="polite"></div>
-                        <button class="download-btn" id="downloadBtn">Download Markdown</button>
                     </div>
                 </div>
             </section>

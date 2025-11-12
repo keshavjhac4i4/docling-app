@@ -2,8 +2,12 @@ const state = Object.seal({
     markdown: '',
     fileName: '',
     originalFile: null,
+    json: null,
+    report: null,
     isPreview: false
 });
+
+const VIEW = Object.freeze({ markdown: 'markdown', json: 'json' });
 
 function setTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
@@ -166,6 +170,61 @@ function displayOutput() {
     }
 }
 
+function displayJsonOutput() {
+    const jsonOutput = document.getElementById('jsonOutput');
+    const jsonReportInfo = document.getElementById('jsonReportInfo');
+    const jsonContent = document.getElementById('jsonContent');
+    const tabJson = document.getElementById('tabJson');
+    const tabPanelJson = document.getElementById('tabPanelJson');
+
+    if (!jsonOutput) return;
+
+    if (!state.json) {
+        jsonOutput.classList.remove('show');
+        tabJson?.setAttribute('aria-disabled', 'true');
+        tabJson?.classList.add('disabled');
+        tabPanelJson?.classList.remove('has-data');
+        if (jsonContent) jsonContent.textContent = '';
+        if (jsonReportInfo) jsonReportInfo.textContent = '';
+        return;
+    }
+
+    jsonOutput.classList.add('show');
+    tabJson?.removeAttribute('aria-disabled');
+    tabJson?.classList.remove('disabled');
+    tabPanelJson?.classList.add('has-data');
+    if (jsonContent) jsonContent.textContent = JSON.stringify(state.json, null, 2);
+    if (jsonReportInfo) {
+        const { report } = state;
+        if (report?.name) {
+            jsonReportInfo.textContent = `${report.name}${typeof report.score === 'number' ? ` • score ${report.score.toFixed(2)}` : ''}`;
+        } else {
+            jsonReportInfo.textContent = '';
+        }
+    }
+}
+
+function setActiveTab(view) {
+    const tabMarkdown = document.getElementById('tabMarkdown');
+    const tabJson = document.getElementById('tabJson');
+    const panelMarkdown = document.getElementById('tabPanelMarkdown');
+    const panelJson = document.getElementById('tabPanelJson');
+
+    const isMarkdown = view === VIEW.markdown;
+
+    tabMarkdown?.classList.toggle('active', isMarkdown);
+    tabMarkdown?.setAttribute('aria-selected', String(isMarkdown));
+    panelMarkdown?.classList.toggle('active', isMarkdown);
+    panelMarkdown?.setAttribute('aria-hidden', String(!isMarkdown));
+
+    const hasJsonData = Boolean(state.json);
+    const jsonActive = !isMarkdown && hasJsonData;
+    tabJson?.classList.toggle('active', jsonActive);
+    tabJson?.setAttribute('aria-selected', String(jsonActive));
+    panelJson?.classList.toggle('active', jsonActive);
+    panelJson?.setAttribute('aria-hidden', String(!jsonActive));
+}
+
 window.addEventListener('DOMContentLoaded', () => {
     initTheme();
 
@@ -189,6 +248,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const uploadArea = document.getElementById('uploadArea');
     const fileInput = document.getElementById('fileInput');
     const uploadFilename = document.getElementById('uploadFilename');
+    const reportSelect = document.getElementById('reportSelect');
     const convertBtn = document.getElementById('convertBtn');
     const loading = document.getElementById('loading');
     const loadingFileName = document.getElementById('loadingFileName');
@@ -196,6 +256,9 @@ window.addEventListener('DOMContentLoaded', () => {
     const toggleSwitch = document.getElementById('toggleSwitch');
     const downloadBtn = document.getElementById('downloadBtn');
     const errorMessage = document.getElementById('errorMessage');
+    const copyJsonBtn = document.getElementById('copyJsonBtn');
+    const tabMarkdown = document.getElementById('tabMarkdown');
+    const tabJson = document.getElementById('tabJson');
 
     const setLoadingState = (isLoading) => {
         loading?.classList.toggle('show', isLoading);
@@ -203,9 +266,13 @@ window.addEventListener('DOMContentLoaded', () => {
         if (isLoading && loadingFileName) {
             loadingFileName.textContent = state.fileName;
         }
-        // Hide filename in upload area when loading starts
-        if (isLoading && uploadFilename) {
-            uploadFilename.classList.remove('show');
+        if (uploadFilename) {
+            if (isLoading) {
+                uploadFilename.classList.remove('show');
+            } else if (state.fileName) {
+                uploadFilename.textContent = state.fileName;
+                uploadFilename.classList.add('show');
+            }
         }
     };
 
@@ -213,17 +280,73 @@ window.addEventListener('DOMContentLoaded', () => {
         outputSection?.classList.toggle('show', isVisible);
     };
 
-    const showError = (message) => {
+    const showError = (message, detail) => {
         if (!errorMessage) return;
-        errorMessage.textContent = message;
+        clearElement(errorMessage);
+
+        if (message) {
+            const messageEl = document.createElement('p');
+            messageEl.textContent = message;
+            errorMessage.appendChild(messageEl);
+        }
+
+        const candidates = detail?.candidates;
+        if (Array.isArray(candidates) && candidates.length > 0) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'report-candidate-list';
+
+            const hint = document.createElement('p');
+            hint.className = 'candidate-hint';
+            hint.textContent = 'Select a report type:';
+            wrapper.appendChild(hint);
+
+            const buttonRow = document.createElement('div');
+            buttonRow.className = 'candidate-button-row';
+
+            candidates.forEach((candidate) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'candidate-btn';
+                button.textContent = candidate.name || candidate.id;
+                button.addEventListener('click', () => {
+                    if (reportSelect) {
+                        reportSelect.value = candidate.id || '';
+                    }
+                    showError(`Selected ${candidate.name || candidate.id}. Click "Convert to Markdown" to continue.`);
+                });
+                buttonRow.appendChild(button);
+            });
+
+            wrapper.appendChild(buttonRow);
+            errorMessage.appendChild(wrapper);
+        }
+
         errorMessage.classList.add('show');
     };
 
     const clearError = () => {
         if (!errorMessage) return;
-        errorMessage.textContent = '';
+        clearElement(errorMessage);
         errorMessage.classList.remove('show');
     };
+
+    async function fetchReports() {
+        if (!reportSelect) return;
+        try {
+            const response = await fetch('/reports');
+            const data = await response.json();
+            const reports = Array.isArray(data?.reports) ? data.reports : [];
+            reports.forEach((report) => {
+                if (!report?.id) return;
+                const option = document.createElement('option');
+                option.value = report.id;
+                option.textContent = report.name || report.id;
+                reportSelect.appendChild(option);
+            });
+        } catch (error) {
+            console.warn('Failed to load report list', error);
+        }
+    }
 
     const openPicker = () => fileInput?.click();
     uploadArea?.addEventListener('click', openPicker);
@@ -254,10 +377,14 @@ window.addEventListener('DOMContentLoaded', () => {
     function handleFileSelect(file) {
         state.fileName = file?.name || '';
         state.originalFile = null;
+        state.json = null;
+        state.report = null;
         setOutputVisibility(false);
         clearError();
         displayOriginalDocument();
+        displayJsonOutput();
         if (convertBtn) convertBtn.disabled = false;
+        setActiveTab(VIEW.markdown);
         
         // Show filename in upload area
         if (uploadFilename) {
@@ -273,9 +400,16 @@ window.addEventListener('DOMContentLoaded', () => {
         setLoadingState(true);
         setOutputVisibility(false);
         clearError();
+        state.json = null;
+        state.report = null;
+        displayJsonOutput();
+        setActiveTab(VIEW.markdown);
 
         const formData = new FormData();
         formData.append('file', file);
+        if (reportSelect && reportSelect.value) {
+            formData.append('report_id', reportSelect.value);
+        }
 
         try {
             const response = await fetch('/convert', { method: 'POST', body: formData });
@@ -287,9 +421,20 @@ window.addEventListener('DOMContentLoaded', () => {
                 if (state.originalFile && state.originalFile.original_name) {
                     state.fileName = state.originalFile.original_name;
                 }
+                state.json = data.json || null;
+                state.report = data.report || null;
+                if (!reportSelect?.value && state.report?.id) {
+                    reportSelect.value = state.report.id;
+                }
                 displayOriginalDocument();
                 displayOutput();
+                displayJsonOutput();
                 setOutputVisibility(true);
+                if (state.json) {
+                    setActiveTab(VIEW.json);
+                } else {
+                    setActiveTab(VIEW.markdown);
+                }
                 // Auto scroll to the output and to the bottom of its content
                 requestAnimationFrame(() => {
                     outputSection?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -299,10 +444,23 @@ window.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             } else {
-                throw new Error(data?.detail || 'Conversion failed');
+                const message = typeof data?.detail === 'string'
+                    ? data.detail
+                    : data?.detail?.message || 'Conversion failed';
+                const error = new Error(message);
+                error.detail = data?.detail;
+                error.status = response.status;
+                throw error;
             }
         } catch (error) {
-            showError('Error: ' + (error?.message || error));
+            state.json = null;
+            state.report = null;
+            displayJsonOutput();
+            if (error?.detail?.candidates) {
+                showError(error.detail.message || 'Multiple matching report types found.', error.detail);
+            } else {
+                showError('Error: ' + (error?.message || error));
+            }
         } finally {
             setLoadingState(false);
         }
@@ -326,8 +484,41 @@ window.addEventListener('DOMContentLoaded', () => {
         URL.revokeObjectURL(url);
     });
 
+    copyJsonBtn?.addEventListener('click', async () => {
+        if (!state.json) return;
+        const text = JSON.stringify(state.json, null, 2);
+        try {
+            await navigator.clipboard.writeText(text);
+            const originalLabel = copyJsonBtn.textContent;
+            copyJsonBtn.textContent = 'Copied!';
+            setTimeout(() => {
+                copyJsonBtn.textContent = originalLabel || 'Copy JSON';
+            }, 2000);
+        } catch (err) {
+            console.warn('Failed to copy JSON', err);
+            showError('Unable to copy JSON to clipboard.');
+        }
+    });
+
+    reportSelect?.addEventListener('change', () => {
+        clearError();
+    });
+
+    tabMarkdown?.addEventListener('click', () => {
+        setActiveTab(VIEW.markdown);
+    });
+
+    tabJson?.addEventListener('click', () => {
+        if (!state.json) return;
+        setActiveTab(VIEW.json);
+    });
+
+    fetchReports();
+
     displayOriginalDocument();
     displayOutput();
+    displayJsonOutput();
+    setActiveTab(VIEW.markdown);
 });
 
 
